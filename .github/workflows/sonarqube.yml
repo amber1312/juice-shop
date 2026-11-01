@@ -1,0 +1,77 @@
+name: sonarqube
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+
+      # ---- SonarQube server setup (log these times, but report them separately) ----
+      - name: Start SonarQube server
+        run: |
+          sudo sysctl -w vm.max_map_count=524288
+          docker run -d --name sonarqube -p 9000:9000 \
+            -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
+            sonarqube:community
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 60); do
+            s=$(curl -s http://localhost:9000/api/system/status | jq -r .status 2>/dev/null)
+            echo "status: $s"
+            [ "$s" = "UP" ] && exit 0
+            sleep 5
+          done
+          docker logs sonarqube | tail -50
+          exit 1
+      - name: Create token and log versions
+        run: |
+          TOKEN=$(curl -s -u admin:admin -X POST "http://localhost:9000/api/user_tokens/generate?name=ci-$RANDOM" | jq -r .token)
+          echo "::add-mask::$TOKEN"
+          echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          curl -s http://localhost:9000/api/server/version; echo
+      - name: Pull scanner image
+        run: docker pull sonarsource/sonar-scanner-cli:latest
+
+      # ---- This is the step your 10% rule applies to ----
+      - name: sonar scan
+        run: |
+          docker run --rm --network host -v "$PWD:/usr/src" \
+            -e SONAR_TOKEN -e SONAR_HOST_URL=http://localhost:9000 \
+            sonarsource/sonar-scanner-cli:latest \
+            -Dsonar.projectKey=juice-shop \
+            -Dsonar.sources=. \
+            -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**'
+
+      # ---- Server-side processing (the scan isn't finished until this is done) ----
+      - name: Wait for server processing
+        run: |
+          URL=$(grep ceTaskUrl .scannerwork/report-task.txt | cut -d= -f2-)
+          for i in $(seq 1 100); do
+            s=$(curl -s -u "$SONAR_TOKEN:" "$URL" | jq -r .task.status)
+            echo "CE status: $s"
+            [ "$s" = "SUCCESS" ] && exit 0
+            [ "$s" = "FAILED" ] && exit 1
+            sleep 3
+          done
+          exit 1
+
+      - name: Export findings
+        run: |
+          curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=juice-shop&ps=1&facets=types,severities,impactSoftwareQualities" > sonar-summary.json
+          curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/hotspots/search?projectKey=juice-shop&ps=1" > sonar-hotspots.json
+          jq '.paging.total' sonar-summary.json sonar-hotspots.json
+          p=1
+          while :; do
+            curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=juice-shop&ps=500&p=$p" > sonar-issues-$p.json
+            n=$(jq '.issues | length' sonar-issues-$p.json)
+            [ "$n" -lt 500 ] && break
+            p=$((p+1))
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sonar-result
+          path: sonar-*.json
