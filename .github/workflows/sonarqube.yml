@@ -49,14 +49,25 @@ jobs:
       # ---- Server-side processing (the scan isn't finished until this is done) ----
       - name: Wait for server processing
         run: |
+          echo "token length: ${#SONAR_TOKEN}"
+          docker ps -a
+          ls -la .scannerwork || true
+          cat .scannerwork/report-task.txt || true
           URL=$(grep ceTaskUrl .scannerwork/report-task.txt | cut -d= -f2-)
-          for i in $(seq 1 100); do
-            s=$(curl -s -u "$SONAR_TOKEN:" "$URL" | jq -r .task.status)
-            echo "CE status: $s"
+          echo "CE URL: $URL"
+          for i in $(seq 1 60); do
+            r=$(curl -s -m 10 -w ' HTTP:%{http_code}' -u "$SONAR_TOKEN:" "$URL")
+            echo "$r" | head -c 300; echo
+            s=$(echo "${r% HTTP:*}" | jq -r '.task.status // empty' 2>/dev/null)
             [ "$s" = "SUCCESS" ] && exit 0
-            [ "$s" = "FAILED" ] && exit 1
+            if [ "$s" = "FAILED" ] || [ "$s" = "CANCELED" ]; then
+              docker logs sonarqube | tail -100
+              exit 1
+            fi
             sleep 3
           done
+          docker ps -a
+          docker logs sonarqube | tail -100
           exit 1
 
       - name: Export findings
