@@ -10,13 +10,13 @@ jobs:
           node-version: 24
       - run: npm install
 
-      # ---- SonarQube server setup (log these times, but report them separately) ----
+      # ---- Server setup (report separately from scan overhead) ----
       - name: Start SonarQube server
         run: |
           sudo sysctl -w vm.max_map_count=524288
           docker run -d --name sonarqube -p 9000:9000 \
             -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
-            sonarqube:community
+            sonarqube@sha256:f95aaa9016dd4e92c7d70691167a6d96dbb5d8acffd61eba1cb4335d364a7840
       - name: Wait for server
         run: |
           for i in $(seq 1 60); do
@@ -34,19 +34,19 @@ jobs:
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           curl -s http://localhost:9000/api/server/version; echo
       - name: Pull scanner image
-        run: docker pull sonarsource/sonar-scanner-cli:latest
+        run: docker pull sonarsource/sonar-scanner-cli@sha256:47956b669bf486bdad919e1cbd0533223515aa0b6d1d31763e5a3754942df6d7
 
-      # ---- This is the step your 10% rule applies to ----
+      # ---- Scan step: the 10% rule applies here ----
       - name: sonar scan
         run: |
           docker run --rm --network host -v "$PWD:/usr/src" \
             -e SONAR_TOKEN -e SONAR_HOST_URL=http://localhost:9000 \
-            sonarsource/sonar-scanner-cli:latest \
+            sonarsource/sonar-scanner-cli@sha256:47956b669bf486bdad919e1cbd0533223515aa0b6d1d31763e5a3754942df6d7 \
             -Dsonar.projectKey=juice-shop \
             -Dsonar.sources=. \
             -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**'
 
-      # ---- Server-side processing (the scan isn't finished until this is done) ----
+      # ---- Server-side processing (add to scan time for total overhead) ----
       - name: Wait for server processing
         run: |
           for i in $(seq 1 200); do
