@@ -1,0 +1,41 @@
+name: zap
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner info
+        run: lscpu | grep -E "Model name|^CPU\(s\)"; free -m | head -2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+
+      # ---- App and image setup (report separately from scan overhead) ----
+      - name: Start app
+        run: nohup npm start > app.log 2>&1 &
+      - name: Wait for app
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000)
+            echo "http: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 3
+          done
+          tail -50 app.log
+          exit 1
+      - name: Pull ZAP image
+        run: docker pull ghcr.io/zaproxy/zaproxy:stable
+
+      # ---- Scan step: the 10% rule applies here ----
+      - name: zap baseline scan
+        run: |
+          mkdir zap-out && chmod 777 zap-out
+          docker run --rm --network host -v "$PWD/zap-out:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:3000 -J zap-report.json -I
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zap-result
+          path: zap-out/zap-report.json
