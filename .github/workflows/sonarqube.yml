@@ -67,7 +67,7 @@ jobs:
       - name: Export findings
         run: |
           curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=juice-shop&ps=1&facets=types,severities,impactSoftwareQualities" > sonar-summary.json
-          curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/hotspots/search?projectKey=juice-shop&ps=1" > sonar-hotspots.json
+          curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/hotspots/search?project=juice-shop&ps=1" > sonar-hotspots.json
           jq '.paging.total' sonar-summary.json sonar-hotspots.json
           p=1
           while :; do
