@@ -44,7 +44,7 @@ jobs:
             sonarsource/sonar-scanner-cli@sha256:47956b669bf486bdad919e1cbd0533223515aa0b6d1d31763e5a3754942df6d7 \
             -Dsonar.projectKey=juice-shop \
             -Dsonar.sources=. \
-            -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**'
+            -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**,**/data/static/codefixes/**'
 
       # ---- Server-side processing (add to scan time for total overhead) ----
       - name: Wait for server processing
